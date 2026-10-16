@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RPG Terminal - Edição Modular</title>
+  <link rel="stylesheet" href="./css/style.css">
+</head>
+<body>
+
+<div class="game-container">
+  <div class="hud">
+    <div class="stat-box">
+      <span>❤️ HP: <strong id="hpText">100/100</strong></span>
+      <div class="bar-bg"><div id="hpBar" class="bar-fill hp-fill" style="width: 100%"></div></div>
+    </div>
+    <div class="stat-box">
+      <span>💧 Mana: <strong id="mpText">50/50</strong></span>
+      <div class="bar-bg"><div id="mpBar" class="bar-fill mp-fill" style="width: 100%"></div></div>
+    </div>
+    <div class="stat-box">
+      <span>⭐ Nível: <strong id="lvlText">1</strong> (XP: <span id="xpText">0/20</span>)</span>
+      <span>🪙 Ouro: <strong id="goldText" class="gold-text">10</strong></span>
+    </div>
+    <div class="stat-box">
+      <span>📍 Local: <strong id="locText" class="loc-text">floresta</strong></span>
+      <span>🗡️ ATQ: <strong id="atkText">2-4</strong></span>
+    </div>
+  </div>
+
+  <div id="output"></div>
+
+  <div class="quick-actions">
+    <button class="quick-btn" data-cmd="olhar">👁️ Olhar</button>
+    <button class="quick-btn" data-cmd="atacar">⚔️ Atacar</button>
+    <button class="quick-btn" data-cmd="defender">🛡️ Defender</button>
+    <button class="quick-btn" data-cmd="usar magia">🔥 Magia (15 MP)</button>
+    <button class="quick-btn" data-cmd="usar furtividade">🥷 Furtividade (10 MP)</button>
+    <button class="quick-btn" data-cmd="usar pocao">🧪 Poção</button>
+    <button class="quick-btn" data-cmd="inventario">📦 Inventário</button>
+    <button class="quick-btn" data-cmd="ajuda">❓ Ajuda</button>
+  </div>
+
+  <div class="input-area">
+    <span class="prompt-symbol">&gt;</span>
+    <input type="text" id="commandInput" placeholder="Digite um comando (ex: ir caverna, interagir bau, atacar)..." autofocus autocomplete="off">
+  </div>
+</div>
+
+<script type="module" src="./js/main.js"></script>
+</body>
+</html>
