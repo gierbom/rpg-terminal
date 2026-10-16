@@ -1,27 +1,19 @@
 import { beep, somVitoria } from './audio.js';
 import { salas as salasOriginais } from './dados/mapa.js';
 import { inimigos as inimigosOriginais } from './dados/inimigos.js';
+import { missoes as missoesOriginais } from './dados/quests.js';
+import { classesPersonagem } from './dados/classes.js';
 import { salvarJogo, carregarJogo, apagarSave } from './save.js';
 
 const output = document.getElementById("output");
 const input = document.getElementById("commandInput");
 
-// Cópias mutáveis em tempo de execução
 let salas = JSON.parse(JSON.stringify(salasOriginais));
 let inimigos = JSON.parse(JSON.stringify(inimigosOriginais));
+let missoes = JSON.parse(JSON.stringify(missoesOriginais));
 
-let jogador = {
-  hp: 100, maxHp: 100,
-  mp: 50, maxMp: 50,
-  nivel: 1, xp: 0, xpProximo: 20,
-  ouro: 10,
-  danoMin: 2, danoMax: 4,
-  pocoes: 2,
-  local: "floresta",
-  inventario: [],
-  defendendo: false,
-  furtivo: false
-};
+let jogador = null;
+let aguardandoSelecaoClasse = false;
 
 function rand(min, max) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
@@ -36,6 +28,7 @@ function print(msg, classe = "") {
 }
 
 function atualizarHUD() {
+  if (!jogador) return;
   document.getElementById("hpText").textContent = `${jogador.hp}/${jogador.maxHp}`;
   document.getElementById("hpBar").style.width = `${Math.max(0, (jogador.hp / jogador.maxHp) * 100)}%`;
   document.getElementById("mpText").textContent = `${jogador.mp}/${jogador.maxMp}`;
@@ -52,15 +45,15 @@ function ganharXP(qtd) {
   if (jogador.xp >= jogador.xpProximo) {
     jogador.xp -= jogador.xpProximo;
     jogador.nivel++;
-    jogador.xpProximo = Math.floor(jogador.xpProximo * 1.6);
-    jogador.maxHp += 20;
+    jogador.xpProximo = Math.floor(jogador.xpProximo * 1.5);
+    jogador.maxHp += 25;
     jogador.hp = jogador.maxHp;
     jogador.maxMp += 15;
     jogador.mp = jogador.maxMp;
     jogador.danoMin += 2;
     jogador.danoMax += 3;
     somVitoria();
-    print(`🎉 <strong>SUBIU DE NÍVEL!</strong> Você alcançou o Nível ${jogador.nivel}! HP, Mana e Ataque aumentaram!`, "msg-heal");
+    print(`🎉 <strong>SUBIU DE NÍVEL!</strong> Nível ${jogador.nivel} alcançado!`, "msg-heal");
   }
 }
 
@@ -94,8 +87,15 @@ function checarVitoriaOuDerrotaInimigo(alvo) {
     ganharXP(alvo.xp);
     somVitoria();
 
+    if (alvo.local === "pantano" && missoes["purificar_pantano"].ativa && !missoes["purificar_pantano"].concluida) {
+      missoes["purificar_pantano"].concluida = true;
+      jogador.ouro += missoes["purificar_pantano"].recompensaOuro;
+      ganharXP(missoes["purificar_pantano"].recompensaXp);
+      print(`📜 <strong>Missão Concluída:</strong> A Praga do Pântano! Recompensa recebida!`, "msg-quest");
+    }
+
     if (alvo.boss) {
-      print(`👑 <strong>PARABÉNS!</strong> Você expurgou o Guardião Abissal e salvou o reino! Fim da jornada!`, "msg-heal");
+      print(`👑 <strong>PARABÉNS!</strong> Você expurgou o Guardião Abissal e salvou o reino!`, "msg-heal");
       input.disabled = true;
     }
     return true;
@@ -108,14 +108,14 @@ function turnoDoInimigo() {
   if (!e) return;
 
   if (jogador.furtivo) {
-    print(`💨 ${e.nome} procura por você nas sombras, mas não consegue te atacar!`);
+    print(`💨 ${e.nome} procura por você nas sombras sem sucesso!`);
     return;
   }
 
   let dano = rand(Math.floor(e.dano * 0.7), e.dano);
   if (jogador.defendendo) {
     dano = Math.max(1, Math.floor(dano * 0.3));
-    print(`🛡️ Sua defesa bloqueou a maior parte do golpe!`);
+    print(`🛡️ Sua defesa bloqueou grande parte do ataque!`);
     jogador.defendendo = false;
   }
 
@@ -124,25 +124,63 @@ function turnoDoInimigo() {
   print(`💥 ${e.nome} te ataca causando <strong>${dano} de dano</strong>!`, "msg-combat");
 
   if (jogador.hp <= 0) {
-    print("💀 Você caiu em combate... Sua jornada terminou. Digite <strong>reiniciar</strong> para começar de novo.", "msg-combat");
-    beep(90, 500, "sawtooth");
+    print("💀 Você caiu em combate... Digite <strong>reiniciar</strong> para tentar de novo.", "msg-combat");
     apagarSave();
     input.disabled = true;
   }
 }
 
-function handleCommand(cmd) {
+function iniciarSelecaoClasse() {
+  aguardandoSelecaoClasse = true;
+  print("⚔️ <strong>ESCOLHA SUA CLASSE DE HERÓI:</strong>");
+  for (let key in classesPersonagem) {
+    let c = classesPersonagem[key];
+    print(`• <strong>${c.nome.toUpperCase()}</strong>: ${c.descricao} (HP: ${c.hpMax} | MP: ${c.mpMax})<br><em>Digite: escolher ${key}</em>`);
+  }
+}
+
+function processarComando(cmd) {
   cmd = cmd.trim().toLowerCase();
   if (!cmd) return;
 
-  // Comandos permitidos mesmo com o input travado (caso morra)
   if (input.disabled) {
-    if (cmd === "reiniciar" || cmd === "novo jogo") {
+    if (cmd === "reiniciar") {
       apagarSave();
       location.reload();
-      return;
     }
-    print("O jogo terminou. Digite <strong>reiniciar</strong> para começar uma nova aventura.");
+    return;
+  }
+
+  if (aguardandoSelecaoClasse) {
+    if (cmd.startsWith("escolher ")) {
+      let escolha = cmd.slice(9).trim();
+      if (classesPersonagem[escolha]) {
+        let template = classesPersonagem[escolha];
+        jogador = {
+          classe: template.nome,
+          hp: template.hpMax, maxHp: template.hpMax,
+          mp: template.mpMax, maxMp: template.mpMax,
+          nivel: 1, xp: 0, xpProximo: 30,
+          ouro: template.bonusOuro,
+          danoMin: template.danoMin, danoMax: template.danoMax,
+          pocoes: 3,
+          local: "vila",
+          inventario: [],
+          habilidades: [...template.habilidadesIniciais],
+          defendendo: false,
+          furtivo: false
+        };
+        aguardandoSelecaoClasse = false;
+        print(`✨ Você escolheu a classe <strong>${template.nome}</strong>! Sua jornada começa na Vila de Oakhaven.`, "msg-heal");
+        salvarJogo(jogador, salas, inimigos, missoes);
+        descreverLocal();
+        atualizarHUD();
+      } else {
+        print("Classe inválida. Escolha entre: guerreiro, mago, druida, ladino.");
+      }
+    } else {
+      print("Por favor, digite <em>escolher [guerreiro/mago/druida/ladino]</em> para iniciar.");
+    }
     return;
   }
 
@@ -162,7 +200,7 @@ function handleCommand(cmd) {
     } else {
       if (salas[destino].trancado) {
         salas[destino].trancado = false;
-        print("🔓 Você destranca o portão pesado com a chave!", "msg-loot");
+        print("🔓 Você destranca o portão!", "msg-loot");
       }
       jogador.local = destino;
       jogador.furtivo = false;
@@ -188,52 +226,65 @@ function handleCommand(cmd) {
       print(`⚔️ Você ataca ${inimigoSala.nome} causando <strong>${dano} de dano</strong>!`);
       checarVitoriaOuDerrotaInimigo(inimigoSala);
     } else {
-      print("Não há inimigos aqui para atacar.");
+      print("Não há inimigos aqui.");
       gastouTurno = false;
     }
 
   } else if (cmd === "defender") {
     jogador.defendendo = true;
-    jogador.mp = Math.min(jogador.maxMp, jogador.mp + 8);
+    jogador.mp = Math.min(jogador.maxMp, jogador.mp + 10);
     beep(200, 100, "triangle");
-    print("🛡️ Você assume postura defensiva (reduz o próximo dano em 70% e recupera +8 Mana).", "msg-heal");
+    print("🛡️ Postura defensiva ativada (reduz dano e recupera 10 Mana).", "msg-heal");
 
-  } else if (cmd === "usar magia") {
-    if (jogador.mp < 15) {
-      print("💧 Mana insuficiente! (Necessário: 15 MP). Use 'defender' para recuperar.", "msg-magic");
-      gastouTurno = false;
-    } else if (inimigoSala) {
-      jogador.mp -= 15;
-      jogador.furtivo = false;
-      let dano = rand(jogador.danoMax + 3, jogador.danoMax + 6);
-      inimigoSala.hp -= dano;
-      beep(580, 180, "sine");
-      print(`🔥 Você lança uma Bola de Fogo em ${inimigoSala.nome} causando <strong>${dano} de dano</strong>!`, "msg-magic");
-      checarVitoriaOuDerrotaInimigo(inimigoSala);
+  } else if (cmd.startsWith("usar ")) {
+    const habOuItem = cmd.slice(5).trim();
+    if (habOuItem === "pocao" || habOuItem === "poção") {
+      if (jogador.pocoes > 0) {
+        jogador.hp = Math.min(jogador.maxHp, jogador.hp + 45);
+        jogador.pocoes--;
+        beep(440, 150, "sine");
+        print("🧪 Poção usada (+45 HP).", "msg-heal");
+      } else {
+        print("Sem poções.");
+        gastouTurno = false;
+      }
+    } else if (habOuItem === "bola de fogo" || habOuItem === "magia") {
+      if (jogador.mp < 20) {
+        print("💧 Mana insuficiente (20 MP necessário).");
+        gastouTurno = false;
+      } else if (inimigoSala) {
+        jogador.mp -= 20;
+        let dano = rand(15, 25);
+        inimigoSala.hp -= dano;
+        beep(580, 180, "sine");
+        print(`🔥 Bola de Fogo em ${inimigoSala.nome} causa <strong>${dano} de dano</strong>!`, "msg-magic");
+        checarVitoriaOuDerrotaInimigo(inimigoSala);
+      } else {
+        print("Sem alvos para magia aqui.");
+        gastouTurno = false;
+      }
+    } else if (habOuItem === "cura natural") {
+      if (jogador.mp < 15) {
+        print("💧 Mana insuficiente (15 MP necessário).");
+        gastouTurno = false;
+      } else {
+        jogador.mp -= 15;
+        jogador.hp = Math.min(jogador.maxHp, jogador.hp + 35);
+        beep(500, 120, "sine");
+        print("🌿 Magia druídica restaura <strong>+35 HP</strong>!", "msg-heal");
+      }
+    } else if (habOuItem === "furtividade" || habOuItem === "ataque surpresa") {
+      if (jogador.mp < 12) {
+        print("💧 Mana insuficiente.");
+        gastouTurno = false;
+      } else {
+        jogador.mp -= 12;
+        jogador.furtivo = true;
+        beep(120, 120, "sine");
+        print("🥷 Você se oculta nas sombras para o próximo ataque!", "msg-magic");
+      }
     } else {
-      print("Não há inimigos aqui para alvejar com magia.");
-      gastouTurno = false;
-    }
-
-  } else if (cmd === "usar furtividade") {
-    if (jogador.mp < 10) {
-      print("💧 Mana insuficiente! (Necessário: 10 MP).");
-      gastouTurno = false;
-    } else {
-      jogador.mp -= 10;
-      jogador.furtivo = true;
-      beep(120, 120, "sine");
-      print("🥷 Você se oculta nas sombras. O inimigo não te verá neste turno e seu próximo ataque causará o DOBRO de dano!", "msg-magic");
-    }
-
-  } else if (cmd === "usar pocao") {
-    if (jogador.pocoes > 0) {
-      jogador.hp = Math.min(jogador.maxHp, jogador.hp + 40);
-      jogador.pocoes--;
-      beep(440, 150, "sine");
-      print("🧪 Você bebe uma poção e recupera <strong>+40 HP</strong>!", "msg-heal");
-    } else {
-      print("Você não tem poções restantes.");
+      print("Habilidade ou item desconhecido.");
       gastouTurno = false;
     }
 
@@ -242,91 +293,85 @@ function handleCommand(cmd) {
     const sala = salas[jogador.local];
     if (sala.itensChao.includes(item)) {
       jogador.inventario.push(item);
-      sala.itensChao = sala.itensChao.filter(obj => obj !== item);
+      sala.itensChao = sala.itensChao.filter(i => i !== item);
       beep(380, 100);
-      print(`🎒 Você guardou <strong>${item}</strong> no inventário.`, "msg-loot");
+      print(`🎒 Você pegou: <strong>${item}</strong>.`, "msg-loot");
     } else {
-      print("Esse item não está no chão.");
+      print("Item não encontrado no chão.");
       gastouTurno = false;
     }
 
-  } else if (cmd.startsWith("interagir ") || cmd.startsWith("abrir ") || cmd.startsWith("usar ")) {
-    const alvo = cmd.split(" ").slice(1).join(" ");
+  } else if (cmd.startsWith("interagir ")) {
+    const alvo = cmd.slice(10).trim();
     const sala = salas[jogador.local];
-
     if (!sala.interagiveis.includes(alvo)) {
-      print("Não há nada com esse nome aqui para interagir.");
+      print("Nada com esse nome para interagir.");
+      gastouTurno = false;
+    } else if (alvo === "anciao") {
+      print("👴 Ancião: <em>'Herói, o Pântano foi tomado por criaturas vis. Ajude-nos e será recompensado!'</em>");
+      if (!missoes["purificar_pantano"].ativa) {
+        missoes["purificar_pantano"].ativa = true;
+        print("📜 <strong>Nova Missão Aceita:</strong> A Praga do Pântano!", "msg-quest");
+      }
+      gastouTurno = false;
+    } else if (alvo === "ferreiro") {
+      if (jogador.ouro >= 30 && !jogador.inventario.includes("espada mítica")) {
+        jogador.ouro -= 30;
+        jogador.inventario.push("espada mítica");
+        jogador.danoMin += 4;
+        jogador.danoMax += 6;
+        somVitoria();
+        print("⚒️ O Ferreiro forja uma Espada Mítica para você! Seu ataque aumentou drasticamente!", "msg-loot");
+      } else {
+        print("⚒️ Ferreiro: <em>'Traga-me 30 de ouro para forjar uma arma lendária.'</em>");
+      }
+      gastouTurno = false;
+    } else if (alvo === "bardo") {
+      print("🎶 O bardo toca uma melodia revigorante. Você ganha +10 de Mana!");
+      jogador.mp = Math.min(jogador.maxMp, jogador.mp + 10);
+      gastouTurno = false;
+    } else if (alvo === "mercador") {
+      if (jogador.ouro >= 12) {
+        jogador.ouro -= 12;
+        jogador.pocoes++;
+        print("🧪 Você comprou 1 Poção de Vida.", "msg-heal");
+      } else {
+        print("Mercador: <em>'Você precisa de 12 de ouro.'</em>");
+      }
       gastouTurno = false;
     } else if (alvo === "bau") {
-      print("📦 Você abre o baú antigo e encontra <strong>1 Poção</strong> e <strong>15 de Ouro</strong>!", "msg-loot");
+      print("📦 O baú continha <strong>20 de Ouro</strong> e <strong>1 Poção</strong>!", "msg-loot");
+      jogador.ouro += 20;
       jogador.pocoes++;
-      jogador.ouro += 15;
       sala.interagiveis = sala.interagiveis.filter(i => i !== "bau");
       somVitoria();
-    } else if (alvo === "mercador") {
-      if (jogador.ouro >= 20 && !jogador.inventario.includes("espada")) {
-        jogador.ouro -= 20;
-        jogador.inventario.push("espada");
-        jogador.danoMin += 3;
-        jogador.danoMax += 4;
-        somVitoria();
-        print("🗡️ O mercador te vende uma <strong>Espada de Aço</strong> por 20 de Ouro! Seu ataque aumentou!", "msg-loot");
-      } else if (jogador.ouro >= 10) {
-        jogador.ouro -= 10;
-        jogador.pocoes++;
-        beep(400, 100);
-        print("🧪 O mercador te vende <strong>1 Poção de Vida</strong> por 10 de Ouro!", "msg-heal");
-      } else {
-        print("💬 Mercador: <em>'Traga 20 de ouro para uma Espada nova, ou 10 de ouro para uma Poção!'</em>");
-        gastouTurno = false;
-      }
-    } else if (alvo === "pedestal") {
-      if (jogador.inventario.includes("tocha")) {
-        print("🔥 Você acende o pedestal com sua tocha! Uma runa antiga restaura todo seu HP e Mana!", "msg-heal");
-        jogador.hp = jogador.maxHp;
-        jogador.mp = jogador.maxMp;
-        sala.interagiveis = sala.interagiveis.filter(i => i !== "pedestal");
-        somVitoria();
-      } else {
-        print("O pedestal possui uma pira apagada. Se você tivesse uma <strong>tocha</strong>, poderia acendê-lo.");
-        gastouTurno = false;
-      }
-    } else if (alvo === "altar") {
-      print("Um altar sombrio pulsa com energia abissal.");
+    } else {
+      print("Você interage com " + alvo + ", mas nada de especial acontece.");
       gastouTurno = false;
     }
 
   } else if (cmd === "inventario") {
-    print(`📦 Itens: <strong>${jogador.inventario.join(", ") || "nenhum"}</strong> | 🧪 Poções: <strong>${jogador.pocoes}</strong> | 🪙 Ouro: <strong>${jogador.ouro}</strong>`);
+    print(`📦 Inventário: <strong>${jogador.inventario.join(", ") || "vazio"}</strong> | 🧪 Poções: <strong>${jogador.pocoes}</strong> | 🪙 Ouro: <strong>${jogador.ouro}</strong>`);
+    print(`⚡ Habilidades: <strong>${jogador.habilidades.join(", ")}</strong>`);
     gastouTurno = false;
 
-  } else if (cmd === "salvar") {
-    if (salvarJogo(jogador, salas, inimigos)) {
-      print("💾 Jogo salvo com sucesso no navegador!", "msg-heal");
-      beep(500, 100, "sine");
-    } else {
-      print("Erro ao salvar o jogo.");
+  } else if (cmd === "missoes" || cmd === "missões") {
+    print("📜 <strong>Missões Ativas:</strong>");
+    for (let k in missoes) {
+      let m = missoes[k];
+      if (m.ativa) {
+        let status = m.concluida ? "✅ (Concluída)" : "⏳ (Em Andamento)";
+        print(`• <strong>${m.titulo}</strong> ${status}: ${m.descricao}`);
+      }
     }
     gastouTurno = false;
 
-  } else if (cmd === "reiniciar") {
-    apagarSave();
-    print("🔄 Progresso apagado. Reiniciando...");
-    setTimeout(() => location.reload(), 1000);
-    gastouTurno = false;
-
   } else if (cmd === "ajuda") {
-    print("📜 <strong>Comandos disponíveis:</strong>");
-    print("• <em>ir [local]</em> — move para outra área (ex: ir caverna)");
-    print("• <em>interagir [objeto]</em> — interage com baú, mercador, pedestal");
-    print("• <em>pegar [item]</em> — coleta itens do chão (ex: pegar tocha)");
-    print("• <em>atacar</em> / <em>defender</em> / <em>usar magia</em> / <em>usar furtividade</em> / <em>usar pocao</em>");
-    print("• <em>salvar</em> — salva o jogo manualmente");
-    print("• <em>reiniciar</em> — apaga o save e recomeça do zero");
+    print("📜 <strong>Comandos:</strong> ir [local], olhar, atacar, defender, pegar [item], interagir [nome], usar [item/hab], inventario, missoes, reiniciar");
     gastouTurno = false;
 
   } else {
-    print("Comando não reconhecido. Digite <strong>ajuda</strong>.");
+    print("Comando inválido. Digite <strong>ajuda</strong>.");
     gastouTurno = false;
   }
 
@@ -334,48 +379,43 @@ function handleCommand(cmd) {
     turnoDoInimigo();
   }
 
-  // Salvamento automático após cada turno válido
-  if (jogador.hp > 0) {
-    salvarJogo(jogador, salas, inimigos);
+  if (jogador && jogador.hp > 0) {
+    salvarJogo(jogador, salas, inimigos, missoes);
   }
 
   atualizarHUD();
 }
 
-// Eventos dos botões rápidos
 document.querySelectorAll(".quick-btn").forEach(btn => {
   btn.addEventListener("click", () => {
     if (input.disabled) return;
     const cmd = btn.getAttribute("data-cmd");
     print(`&gt; ${cmd}`, "msg-cmd");
-    handleCommand(cmd);
+    processarComando(cmd);
     input.focus();
   });
 });
 
-// Evento da barra de digitação
 input.addEventListener("keydown", function (e) {
   if (e.key === "Enter") {
     const cmd = input.value;
     if (!cmd.trim()) return;
     print(`&gt; ${cmd}`, "msg-cmd");
     input.value = "";
-    handleCommand(cmd);
+    processarComando(cmd);
   }
 });
 
-// Inicialização com suporte a Carregamento Automático
-print("🎮 <strong>BEM-VINDO AO RPG TERMINAL - EDIÇÃO MODULAR & SAVE</strong> 🇧🇷");
-
+print("🎮 <strong>BEM-VINDO AO RPG TERMINAL - EDIÇÃO ÉPICA EXPANDIDA</strong> 🇧🇷");
 const jogoSalvo = carregarJogo();
 if (jogoSalvo) {
   jogador = jogoSalvo.jogador;
   salas = jogoSalvo.salas;
   inimigos = jogoSalvo.inimigos;
-  print("📂 <strong>Progresso carregado automaticamente do seu último jogo!</strong>", "msg-heal");
+  missoes = jogoSalvo.missoes;
+  print("📂 <strong>Progresso carregado com sucesso!</strong>", "msg-heal");
+  descreverLocal();
+  atualizarHUD();
 } else {
-  print("Dica: Derrote os monstros, compre uma espada na cabana e encontre a chave para o Santuário!");
+  iniciarSelecaoClasse();
 }
-
-descreverLocal();
-atualizarHUD();
